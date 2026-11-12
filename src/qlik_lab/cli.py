@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{app.app_id}  {app.name}")
         elif args.cmd == "reload":
             app_id = _resolve(client, args.app)
-            reload_id = client.trigger_reload(app_id, {"vRunId": "cli"})
+            reload_id = client.trigger_reload(app_id, client.reload_variables(app_id, {"vRunId": "cli"}))
             print(f"Reload {reload_id} lancé, attente du statut…")
             run = client.wait_for_reload(reload_id, timeout_s=args.timeout)
             print(f"{run.status.value} en {run.duration_s or 0:.0f} s")
@@ -108,8 +108,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.reload and not args.dry_run:
                 for spec in specs:
                     name = spec.full_name(client.settings.app_prefix)
+                    app_id = client.resolve_app_id(name)
                     reload_id = client.trigger_reload(
-                        client.resolve_app_id(name), {"vRunId": f"cd-{version}"}
+                        app_id, client.reload_variables(app_id, {"vRunId": f"cd-{version}"})
                     )
                     run = client.wait_for_reload(reload_id)
                     print(f"Reload {name} : {run.status.value}")

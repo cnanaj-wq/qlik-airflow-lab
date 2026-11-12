@@ -26,8 +26,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk import Param, PokeReturnValue, Variable, dag, get_current_context, task, task_group
+from airflow.sdk.exceptions import AirflowFailException
 
 from qlik_lab import supervision
 from qlik_lab.airflow_helpers import APPS, publier_volume, qlik_client
@@ -161,7 +161,8 @@ def qlik_sales_pipeline() -> None:
                     client.delete_data_file(name)
                     log.warning("Incident simulé actif (qlik_lab_fault=missing_file) : dépôt sous %s", target)
                 uploaded[target] = client.upload_data_file(target, (folder / name).read_bytes())
-            publier_volume(int(extract_info["control"]["rows"]) + int(extract_info["duplicated_rows"]))
+            # Pas de publier_volume ici : le dépôt transporte les lignes, il n'en produit pas.
+            # Lens additionne les volumes d'une étape : une seule tâche par étape doit publier.
             return {"files": sorted(uploaded)}
 
         upload_to_qlik(generate_sales_extract())
@@ -173,7 +174,8 @@ def qlik_sales_pipeline() -> None:
         client = qlik_client()
         name = f"{client.settings.app_prefix}{APPS[app_key]}"
         app_id = client.resolve_app_id(name)  # par NOM : les identifiants diffèrent d'un tenant à l'autre
-        reload_id = client.trigger_reload(app_id, variables={"vRunId": ctx["run_id"][:200]})
+        variables = client.reload_variables(app_id, {"vRunId": ctx["run_id"][:200]})
+        reload_id = client.trigger_reload(app_id, variables=variables)
         log.info("Reload %s lancé pour %s (%s)", reload_id, name, app_id)
         return {"app_key": app_key, "app_name": name, "app_id": app_id, "reload_id": reload_id}
 
@@ -206,7 +208,9 @@ def qlik_sales_pipeline() -> None:
                 f"Reload {trig['app_name']} {run.status.value} : {run.error_message or 'sans message'}\n"
                 f"Extrait du log Qlik :\n{error_lines(script_log)}"
             )
-        if rows is not None:
+        # Un seul volume par étape Lens : 02 pour transform, 03 pour load. L'ingestion (01)
+        # recopie la source à l'identique : la publier doublerait le volume de transform.
+        if rows is not None and trig["app_key"] != "ingestion":
             publier_volume(rows)
         log.info("%s SUCCEEDED en %.0f s, marqueurs DQ : %s", trig["app_name"], run.duration_s or 0, markers)
         return PokeReturnValue(is_done=True, xcom_value={**trig, **run.to_record(), "dq": markers})

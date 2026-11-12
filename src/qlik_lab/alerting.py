@@ -51,17 +51,28 @@ def historiser(evenement: str, context: dict[str, Any], **extra: Any) -> dict[st
     return ligne
 
 
-def incident_ouvert(dag_id: str, task_id: str, run_id: str) -> dict[str, Any] | None:
-    debut: dict[str, Any] | None = None
+def _evenements() -> list[dict[str, Any]]:
     try:
         lignes = INCIDENTS.read_text(encoding="utf-8").splitlines()[-5000:]
     except OSError:
-        return None
+        return []
+    out = []
     for brute in lignes:
         try:
-            e = json.loads(brute)
+            out.append(json.loads(brute))
         except ValueError:
             continue
+    return out
+
+
+def _est_qualite(e: dict[str, Any]) -> bool:
+    # « qualite » seul : ancien format, avant l'alignement sur les événements lus par Lens.
+    return e.get("nature") == "qualite" or e.get("evenement") == "qualite"
+
+
+def incident_ouvert(dag_id: str, task_id: str, run_id: str) -> dict[str, Any] | None:
+    debut: dict[str, Any] | None = None
+    for e in _evenements():
         if (e.get("dag_id"), e.get("task_id"), e.get("run_id")) != (dag_id, task_id, run_id):
             continue
         if e.get("evenement") in ("echec_essai", "echec", "qualite"):
@@ -69,6 +80,24 @@ def incident_ouvert(dag_id: str, task_id: str, run_id: str) -> dict[str, Any] | 
         elif e.get("evenement") == "reprise":
             debut = None
     return debut
+
+
+def incidents_qualite_ouverts(dag_id: str, task_id: str) -> list[dict[str, Any]]:
+    """Incidents qualité non clos de cette tâche, tous runs confondus, du plus ancien au plus récent.
+
+    Un incident qualité ne se reprend pas en rejouant le même run (il referait les mêmes doublons) :
+    il se clôt quand la porte qualité repasse au vert dans un run suivant, après correction de la source.
+    """
+    ouverts: dict[str, dict[str, Any]] = {}
+    for e in _evenements():
+        if (e.get("dag_id"), e.get("task_id")) != (dag_id, task_id):
+            continue
+        run = str(e.get("run_id"))
+        if e.get("evenement") in ("echec", "qualite") and _est_qualite(e):
+            ouverts.setdefault(run, e)
+        elif e.get("evenement") == "reprise":
+            ouverts.pop(run, None)
+    return sorted(ouverts.values(), key=lambda e: str(e.get("ts")))
 
 
 def _duree(secondes: float) -> str:
@@ -84,7 +113,7 @@ def composer_alerte(
     duree: float | None = None,
     checks: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
-    """Objet et corps HTML. mode : echec | essai | reprise | qualite."""
+    """Objet et corps HTML. mode : echec | essai | reprise | qualite | reprise_qualite."""
     ti = context["task_instance"]
     run_id = context["run_id"]
     t, d = escape(ti.task_id), escape(ti.dag_id)
@@ -96,6 +125,13 @@ def composer_alerte(
         sujet = f"[Airflow] Rétabli : {ti.dag_id} / {ti.task_id}"
         intro = f"<b>{t}</b> (DAG <b>{d}</b>) a réussi après un incident."
         conseil = "Incident clos. Historique dans Pipeline Lens, volet Historique."
+    elif mode == "reprise_qualite":
+        sujet = f"[Airflow] Rétabli — publication reprise : {ti.dag_id}"
+        intro = (
+            "La porte qualité est de nouveau <b>verte</b> : les chiffres correspondent à la source. "
+            "<b>L'app de pilotage est republiée</b> avec des données à jour."
+        )
+        conseil = "Incident qualité clos. Historique dans Pipeline Lens, volet Historique."
     elif mode == "qualite":
         sujet = f"[Airflow] QUALITÉ — publication bloquée : {ti.dag_id}"
         intro = (
@@ -119,6 +155,8 @@ def composer_alerte(
     ]
     if mode == "reprise":
         lignes.append(("Durée de l'incident", _duree(duree or 0)))
+    elif mode == "reprise_qualite":
+        lignes.append(("Publication bloquée pendant", _duree(duree or 0)))
     elif mode != "qualite":
         lignes.append(("Erreur", str(context.get("exception") or "non transmise")[:2000]))
     tableau = "".join(
@@ -170,7 +208,8 @@ def alerte_echec(context: dict[str, Any]) -> None:
     exc = context.get("exception")
     checks = getattr(exc, "checks", None)
     if checks is not None:  # échec de la porte qualité : mail dédié
-        historiser("qualite", context, raison=_raison(context))
+        # Événement « echec » standard (lu par le panneau Incidents de Lens), qualifié par « nature ».
+        historiser("echec", context, nature="qualite", raison=_raison(context))
         _envoyer(context, "qualite", checks=checks)
         return
     historiser("echec", context, raison=_raison(context))
@@ -185,9 +224,29 @@ def alerte_essai(context: dict[str, Any]) -> None:
 
 def signaler_reprise(context: dict[str, Any]) -> None:
     ti = context["task_instance"]
+    maintenant = datetime.now(UTC)
     debut = incident_ouvert(ti.dag_id, ti.task_id, context["run_id"])
-    if not debut:
+    if debut:
+        duree = (maintenant - datetime.fromisoformat(debut["ts"])).total_seconds()
+        historiser("reprise", context, duree_s=round(duree), debut=debut["ts"])
+        _envoyer(context, "reprise", duree)
         return
-    duree = (datetime.now(UTC) - datetime.fromisoformat(debut["ts"])).total_seconds()
-    historiser("reprise", context, duree_s=round(duree), debut=debut["ts"])
-    _envoyer(context, "reprise", duree)
+    # Porte qualité de nouveau verte : on clôt les incidents qualité des runs précédents, chacun sous
+    # le run_id où il s'est ouvert (Lens rattache un incident et sa reprise par run_id).
+    qualite = incidents_qualite_ouverts(ti.dag_id, ti.task_id)
+    if not qualite:
+        return
+    for inc in qualite:
+        duree_inc = (maintenant - datetime.fromisoformat(inc["ts"])).total_seconds()
+        historiser(
+            "reprise",
+            context,
+            run_id=inc["run_id"],
+            nature="qualite",
+            repris_par=context["run_id"],
+            duree_s=round(duree_inc),
+            debut=inc["ts"],
+        )
+    # Durée pour le métier : depuis la PREMIÈRE publication bloquée.
+    duree = (maintenant - datetime.fromisoformat(qualite[0]["ts"])).total_seconds()
+    _envoyer(context, "reprise_qualite", duree)

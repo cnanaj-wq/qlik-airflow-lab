@@ -76,3 +76,29 @@ def test_incident_history_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         alerting.incident_ouvert("qlik_sales_pipeline", "transform.quality_gate", "manual__2026-11-12")
         is None
     )
+
+
+def test_quality_incident_is_visible_to_lens_and_closed_by_next_green_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Porte rouge dans le run A, verte dans le run B : la reprise est écrite sous le run A."""
+    monkeypatch.setattr(alerting, "INCIDENTS", tmp_path / "incidents.jsonl")
+    monkeypatch.delenv("ALERTE_EMAIL_A", raising=False)
+    exc = Exception("Porte qualité ROUGE")
+    exc.checks = []  # type: ignore[attr-defined]
+    ctx_a = _ctx(exc)
+    alerting.alerte_echec(ctx_a)
+
+    ctx_b = {**_ctx(), "run_id": "manual__2026-11-13"}
+    alerting.signaler_reprise(ctx_b)
+    events = [json.loads(x) for x in (tmp_path / "incidents.jsonl").read_text(encoding="utf-8").splitlines()]
+    # « echec » : le seul type d'échec définitif que lit le panneau Incidents de Lens.
+    assert [(e["evenement"], e["run_id"]) for e in events] == [
+        ("echec", "manual__2026-11-12"),
+        ("reprise", "manual__2026-11-12"),
+    ]
+    assert events[0]["nature"] == "qualite" and events[1]["repris_par"] == "manual__2026-11-13"
+    assert alerting.incidents_qualite_ouverts("qlik_sales_pipeline", "transform.quality_gate") == []
+
+    alerting.signaler_reprise({**_ctx(), "run_id": "manual__2026-11-14"})  # rien à clore
+    assert len((tmp_path / "incidents.jsonl").read_text(encoding="utf-8").splitlines()) == 2

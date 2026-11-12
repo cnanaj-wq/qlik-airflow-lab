@@ -125,6 +125,15 @@ def test_trigger_reload_sends_variables(client: QlikCloudClient) -> None:
 
 
 @responses.activate
+def test_first_reload_is_sent_without_variables(client: QlikCloudClient) -> None:
+    """Qlik refuse « variables » sur une app jamais rechargée (variable not found)."""
+    responses.get(f"{BASE}/api/v1/reloads", json={"data": [reload_body("FAILED")]})
+    assert client.reload_variables("a1", {"vRunId": "x"}) is None
+    responses.replace(responses.GET, f"{BASE}/api/v1/reloads", json={"data": [reload_body("SUCCEEDED")]})
+    assert client.reload_variables("a1", {"vRunId": "x"}) == {"vRunId": "x"}
+
+
+@responses.activate
 def test_wait_for_reload_success(client: QlikCloudClient, sleeps: list[float]) -> None:
     responses.get(f"{BASE}/api/v1/reloads/r1", json=reload_body("QUEUED"))
     responses.get(f"{BASE}/api/v1/reloads/r1", json=reload_body("RELOADING"))

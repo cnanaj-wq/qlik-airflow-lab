@@ -167,6 +167,21 @@ class QlikCloudClient:
         data = self._json("POST", "/api/v1/reloads", json=body)
         return str(data["id"])
 
+    def has_successful_reload(self, app_id: str) -> bool:
+        """Vrai si l'app a déjà réussi au moins un reload.
+
+        Utile car le paramètre « variables » de POST /reloads ne fait que MODIFIER des variables
+        existantes : sur une app jamais rechargée, Qlik répond « variable not found ».
+        """
+        return any(r.status.is_success for r in self.list_reloads(app_id, limit=20))
+
+    def reload_variables(self, app_id: str, variables: dict[str, str]) -> dict[str, str] | None:
+        """Variables à transmettre, ou None pour un premier reload d'amorçage."""
+        if self.has_successful_reload(app_id):
+            return variables
+        log.warning("App %s jamais rechargée : premier reload sans variables (amorçage)", app_id)
+        return None
+
     def get_status(self, reload_id: str) -> ReloadRun:
         return ReloadRun.from_api(self._json("GET", f"/api/v1/reloads/{reload_id}"))
 
