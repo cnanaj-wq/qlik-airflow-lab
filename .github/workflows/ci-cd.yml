@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -100,7 +100,7 @@ jobs:
             echo "deploy=false" >> "$GITHUB_OUTPUT"
             echo "Aucun changement dans qlik/ : rien à déployer." >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.changes.outputs.deploy == 'true'
         with:
           python-version: "3.12"
