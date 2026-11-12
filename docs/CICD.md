@@ -66,7 +66,7 @@ rien si `qlik/` n'a pas changé.
    affiche seulement le plan.
 
 **Job `pages`** : après `tests`, publie les schémas interactifs (`docs/*.html`) sur GitHub Pages.
-Seuls les fichiers HTML partent : le code et les notes restent dans le dépôt.
+Seuls les fichiers HTML partent : le code reste dans le dépôt.
 
 ## Échecs, protection et reprise
 
