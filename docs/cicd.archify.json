@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CI/CD des scripts Qlik : du commit à l'app rechargée",
+    "output": "docs/cicd.html",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "views": [
+      {
+        "id": "ci",
+        "label": "01 / CI",
+        "focus": [
+          "push",
+          "tests",
+          "gate",
+          "prend",
+          "cifail"
+        ],
+        "note": "Chaque PR et chaque push sur main passent les contrôles. Une PR s'arrête là : elle n'a pas accès aux secrets."
+      },
+      {
+        "id": "cd",
+        "label": "02 / CD Qlik",
+        "focus": [
+          "gate",
+          "env",
+          "deploy",
+          "apps"
+        ],
+        "note": "Sur main seulement : approbation de l'environnement qlik-cloud, puis scripts poussés par l'API Qlik Cloud."
+      },
+      {
+        "id": "rollback",
+        "label": "03 / Reprise CD",
+        "focus": [
+          "deploy",
+          "apps",
+          "rollback"
+        ],
+        "note": "Une régression se reprend par git revert : le CD repousse la version précédente, Qlik garde l'historique des scripts."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "ci",
+      "label": "CI — intégration continue"
+    },
+    {
+      "id": "cd",
+      "label": "CD — déploiement continu"
+    },
+    {
+      "id": "target",
+      "label": "Cible — Qlik Cloud (réel)"
+    }
+  ],
+  "mainPath": [
+    "push",
+    "tests",
+    "gate",
+    "env",
+    "deploy",
+    "apps"
+  ],
+  "nodes": [
+    {
+      "id": "push",
+      "lane": "ci",
+      "col": 0,
+      "type": "frontend",
+      "label": "PR ou push",
+      "sublabel": "cible : main"
+    },
+    {
+      "id": "tests",
+      "lane": "ci",
+      "col": 1,
+      "type": "backend",
+      "label": "CI : 3 jobs",
+      "sublabel": "tests · dags · compose"
+    },
+    {
+      "id": "gate",
+      "lane": "ci",
+      "col": 3,
+      "type": "security",
+      "label": "Déployer ?",
+      "sublabel": "CI verte + main"
+    },
+    {
+      "id": "prend",
+      "lane": "ci",
+      "col": 5,
+      "type": "external",
+      "label": "PR : fin",
+      "sublabel": "aucun secret"
+    },
+    {
+      "id": "env",
+      "lane": "cd",
+      "col": 3,
+      "type": "security",
+      "label": "qlik-cloud",
+      "sublabel": "secrets + revue"
+    },
+    {
+      "id": "deploy",
+      "lane": "cd",
+      "col": 5,
+      "type": "cloud",
+      "label": "Déployer",
+      "sublabel": "API scripts"
+    },
+    {
+      "id": "apps",
+      "lane": "target",
+      "col": 5,
+      "type": "database",
+      "label": "3 apps Qlik",
+      "sublabel": "script versionné",
+      "tag": "réel"
+    },
+    {
+      "id": "cifail",
+      "lane": "cd",
+      "col": 1,
+      "type": "security",
+      "label": "Contrôle rouge",
+      "sublabel": "rien n'est publié"
+    },
+    {
+      "id": "rollback",
+      "lane": "target",
+      "col": 3,
+      "type": "messagebus",
+      "label": "git revert",
+      "sublabel": "redéploie N-1"
+    }
+  ],
+  "edges": [
+    {
+      "from": "push",
+      "to": "tests"
+    },
+    {
+      "from": "tests",
+      "to": "gate",
+      "label": "OK"
+    },
+    {
+      "from": "gate",
+      "to": "prend",
+      "label": "PR"
+    },
+    {
+      "from": "gate",
+      "to": "env",
+      "label": "qlik/ modifié",
+      "variant": "emphasis",
+      "labelAt": [
+        430,
+        167
+      ]
+    },
+    {
+      "from": "env",
+      "to": "deploy",
+      "label": "approuvé",
+      "variant": "emphasis"
+    },
+    {
+      "from": "deploy",
+      "to": "apps",
+      "label": "vScriptVersion",
+      "variant": "emphasis"
+    },
+    {
+      "from": "tests",
+      "to": "cifail",
+      "label": "échec",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "from": "apps",
+      "to": "rollback",
+      "label": "régression",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "CI · Vérifier avant de publier",
+      "items": [
+        "Lint, typage, 55 tests, règles maison des scripts Qlik",
+        "DAG chargés dans l'image officielle Airflow 3.4",
+        "Une PR ne déploie jamais et ne voit aucun secret"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "CD · Publier seulement après les tests",
+      "items": [
+        "Apps retrouvées par nom, créées si absentes",
+        "Chaque script porte le commit d'origine (vScriptVersion)",
+        "Un déploiement à la fois ; schémas publiés sur GitHub Pages"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Échecs et reprise",
+      "items": [
+        "Contrôle rouge : la version en place reste publiée",
+        "Déploiement raté : git revert, le CD repousse N-1",
+        "Détail dans docs/PLAN-REPRISE.md"
+      ]
+    }
+  ]
+}

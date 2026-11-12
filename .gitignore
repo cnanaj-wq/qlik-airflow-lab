@@ -21,3 +21,6 @@ data/
 # Éditeurs
 .vscode/
 .idea/
+
+# Captures produites par « archify visual-check » (preuves locales, non publiées)
+docs/*.visual-check.*

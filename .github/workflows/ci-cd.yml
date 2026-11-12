@@ -6,6 +6,7 @@
 #   02 / CD    deploy : pousse les scripts Qlik vers Qlik Cloud (apps créées si absentes)
 #              -> seulement sur main, seulement si qlik/ a changé (ou lancement manuel),
 #              -> après approbation de l'environnement « qlik-cloud » si vous l'avez configurée.
+#              pages  : publie les schémas interactifs (docs/*.html) sur GitHub Pages
 #   Une PR ne déploie jamais : elle n'a pas accès aux secrets.
 
 name: ci-cd
@@ -122,3 +123,36 @@ jobs:
           [ "${{ inputs.reload }}" = "true" ] && ARGS="$ARGS --reload"
           python -m qlik_lab deploy $ARGS | tee deploy.txt
           { echo "### Déploiement Qlik Cloud ${GITHUB_SHA::7}"; echo '```'; cat deploy.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # Schémas interactifs (docs/*.html) publiés sur GitHub Pages, comme « mon-premier-ci-cd ».
+  # Seuls les HTML partent : le code et les notes restent dans le dépôt.
+  pages:
+    name: pages
+    needs: [tests]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Paquet du site (docs → _site)
+        run: |
+          mkdir -p _site
+          find docs -maxdepth 1 -name '*.html' ! -name '*.visual-check.*' -exec cp {} _site/ \;
+          cp _site/cicd.html _site/index.html
+          ls -l _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
