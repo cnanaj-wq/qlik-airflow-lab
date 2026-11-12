@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Qlik × Airflow Lab — chaîne Ventes et CI/CD",
+    "output": "docs/workflow.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "cicd",
+        "label": "01 / CI-CD",
+        "focus": [
+          "push",
+          "ci",
+          "deploy",
+          "r01"
+        ],
+        "note": "Les scripts Qlik sont testés puis déployés depuis Git. Une PR ne déploie jamais."
+      },
+      {
+        "id": "nominal",
+        "label": "02 / Chaîne nominale",
+        "focus": [
+          "extract",
+          "upload",
+          "r01",
+          "r02",
+          "gate",
+          "r03"
+        ],
+        "note": "Airflow déclenche chaque reload, attend son statut, contrôle les chiffres, puis publie."
+      },
+      {
+        "id": "quality",
+        "label": "03 / Vert mais faux",
+        "focus": [
+          "r02",
+          "gate",
+          "blocked"
+        ],
+        "note": "Reloads SUCCEEDED, CA gonflé par des doublons : la porte qualité bloque la publication de 03."
+      },
+      {
+        "id": "recovery",
+        "label": "04 / Reprise sur incident",
+        "focus": [
+          "upload",
+          "retry",
+          "r01",
+          "failed"
+        ],
+        "note": "Panne passagère : nouvel essai automatique. Erreur de script : pas de retry, on corrige puis on rejoue depuis le dépôt."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "git",
+      "label": "Git + GitHub Actions"
+    },
+    {
+      "id": "airflow",
+      "label": "Airflow 3 (orchestration)"
+    },
+    {
+      "id": "qlik",
+      "label": "Qlik Cloud (apps)"
+    },
+    {
+      "id": "stops",
+      "label": "Arrêts + reprise",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "extract_ph",
+      "label": "extract",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "transform_ph",
+      "label": "transform",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "load_ph",
+      "label": "load",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "extract",
+    "upload",
+    "r01",
+    "r02",
+    "gate",
+    "r03"
+  ],
+  "nodes": [
+    {
+      "id": "push",
+      "lane": "git",
+      "col": 0,
+      "type": "frontend",
+      "label": "Push main",
+      "sublabel": "scripts .qvs + DAG"
+    },
+    {
+      "id": "ci",
+      "lane": "git",
+      "col": 1,
+      "type": "security",
+      "label": "CI",
+      "sublabel": "tests · dags · compose",
+      "tag": "bloquant"
+    },
+    {
+      "id": "deploy",
+      "lane": "git",
+      "col": 3,
+      "type": "cloud",
+      "label": "Deploy",
+      "sublabel": "API scripts",
+      "tag": "CD"
+    },
+    {
+      "id": "extract",
+      "lane": "airflow",
+      "col": 0,
+      "type": "backend",
+      "label": "Extraction",
+      "sublabel": "ERP synthétique"
+    },
+    {
+      "id": "upload",
+      "lane": "airflow",
+      "col": 1,
+      "type": "backend",
+      "label": "Dépôt",
+      "sublabel": "DataFiles"
+    },
+    {
+      "id": "gate",
+      "lane": "airflow",
+      "col": 4,
+      "type": "security",
+      "label": "Porte qualité",
+      "sublabel": "doublons · CA",
+      "tag": "quality_gate"
+    },
+    {
+      "id": "r01",
+      "lane": "qlik",
+      "col": 2,
+      "type": "database",
+      "label": "01 Ingestion",
+      "sublabel": "QVD RAW"
+    },
+    {
+      "id": "r02",
+      "lane": "qlik",
+      "col": 3,
+      "type": "database",
+      "label": "02 Transform",
+      "sublabel": "étoile + CA"
+    },
+    {
+      "id": "r03",
+      "lane": "qlik",
+      "col": 5,
+      "type": "frontend",
+      "label": "03 Sales Ops",
+      "sublabel": "publiée",
+      "tag": "métier"
+    },
+    {
+      "id": "retry",
+      "lane": "stops",
+      "col": 0,
+      "type": "messagebus",
+      "label": "Nouvel essai",
+      "sublabel": "30 s, 60 s"
+    },
+    {
+      "id": "failed",
+      "lane": "stops",
+      "col": 2,
+      "type": "security",
+      "label": "Mail Échec",
+      "sublabel": "sans retry"
+    },
+    {
+      "id": "blocked",
+      "lane": "stops",
+      "col": 4,
+      "type": "security",
+      "label": "Bloquée",
+      "sublabel": "mail QUALITÉ"
+    }
+  ],
+  "edges": [
+    {
+      "from": "push",
+      "to": "ci"
+    },
+    {
+      "from": "ci",
+      "to": "deploy",
+      "label": "vert"
+    },
+    {
+      "from": "deploy",
+      "to": "r01",
+      "label": "scripts",
+      "variant": "dashed",
+      "role": "async",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "extract",
+      "to": "upload"
+    },
+    {
+      "from": "upload",
+      "to": "r01",
+      "label": "reload",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top",
+      "labelAt": [
+        280,
+        213
+      ]
+    },
+    {
+      "from": "r01",
+      "to": "r02"
+    },
+    {
+      "from": "r02",
+      "to": "gate",
+      "label": "TRACE DQ",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gate",
+      "to": "r03",
+      "label": "vert",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "from": "gate",
+      "to": "blocked",
+      "label": "rouge",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "drop"
+    },
+    {
+      "from": "upload",
+      "to": "retry",
+      "label": "panne",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "from": "r01",
+      "to": "failed",
+      "label": "FAILED",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "01 / Contrôler",
+      "items": [
+        "CI : lint, typage, règles des scripts Qlik",
+        "DAG chargés dans l'image Airflow 3.4",
+        "Une PR ne déploie jamais"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "02 / Publier",
+      "items": [
+        "Déclencher puis attendre (capteur reschedule)",
+        "03 rechargée seulement si la porte est verte",
+        "Rejeu idempotent, run_id visible dans l'app"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "03 / Arrêter",
+      "items": [
+        "Doublons : reloads verts, publication bloquée",
+        "Panne passagère : reprise automatique",
+        "Erreur de script : corriger, rejouer depuis le dépôt"
+      ]
+    }
+  ]
+}

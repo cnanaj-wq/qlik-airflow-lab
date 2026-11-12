@@ -1,0 +1,124 @@
+# CI/CD du lab — même logique que « mon-premier-ci-cd » : on vérifie, PUIS on publie.
+#
+#   01 / CI    tests  : lint (ruff), typage (mypy), tests unitaires + règles des scripts Qlik
+#              dags   : chargement des DAG dans l'image officielle Airflow 3.4
+#              compose: les fichiers Docker Compose sont valides
+#   02 / CD    deploy : pousse les scripts Qlik vers Qlik Cloud (apps créées si absentes)
+#              -> seulement sur main, seulement si qlik/ a changé (ou lancement manuel),
+#              -> après approbation de l'environnement « qlik-cloud » si vous l'avez configurée.
+#   Une PR ne déploie jamais : elle n'a pas accès aux secrets.
+
+name: ci-cd
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reload:
+        description: "Recharger la chaîne 01 → 02 → 03 après déploiement (test de fumée)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Simulation : afficher le plan sans rien écrire dans Qlik"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Typage
+        run: mypy src
+      - name: Tests unitaires et règles des scripts Qlik
+        run: pytest -q
+
+  dags:
+    name: dags
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Intégrité des DAG dans apache/airflow:3.4.0
+        run: |
+          docker run --rm -v "$PWD:/lab" -w /lab -e PYTHONPATH=/lab/src \
+            -e AIRFLOW__CORE__LOAD_EXAMPLES=false apache/airflow:3.4.0 \
+            bash -c "pip install -q pytest && python -m pytest -q -p no:cacheprovider tests/dags"
+
+  compose:
+    name: compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Valider docker-compose.yml
+        run: |
+          printf 'QLIK_TENANT_URL=https://exemple.fr.qlikcloud.com\nQLIK_API_KEY=factice\n' > ci.env
+          docker compose --env-file ci.env -f docker-compose.yml config --quiet
+
+  deploy:
+    name: deploy
+    needs: [tests, dags, compose]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: qlik-cloud
+    concurrency:
+      group: qlik-cloud-deploy
+      cancel-in-progress: false   # jamais deux déploiements en même temps, jamais d'interruption
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Les scripts Qlik ont-ils changé ?
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
+             git diff --name-only HEAD~1 HEAD | grep -qE '^(qlik/|src/qlik_lab/deploy.py)'; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Aucun changement dans qlik/ : rien à déployer." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.changes.outputs.deploy == 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.changes.outputs.deploy == 'true'
+        run: pip install -e .
+      - name: Déployer les scripts vers Qlik Cloud
+        if: steps.changes.outputs.deploy == 'true'
+        env:
+          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
+          QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
+          QLIK_SPACE_ID: ${{ vars.QLIK_SPACE_ID }}
+          QLIK_APP_PREFIX: ${{ vars.QLIK_APP_PREFIX }}
+        run: |
+          if [ -z "$QLIK_TENANT_URL" ] || [ -z "$QLIK_API_KEY" ]; then
+            echo "::error::Secrets QLIK_TENANT_URL / QLIK_API_KEY absents de l'environnement qlik-cloud"
+            exit 2
+          fi
+          ARGS="--version ${GITHUB_SHA::7}"
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          [ "${{ inputs.reload }}" = "true" ] && ARGS="$ARGS --reload"
+          python -m qlik_lab deploy $ARGS | tee deploy.txt
+          { echo "### Déploiement Qlik Cloud ${GITHUB_SHA::7}"; echo '```'; cat deploy.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

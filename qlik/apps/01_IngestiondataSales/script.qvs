@@ -1,0 +1,63 @@
+///$tab Main
+// =============================================================================
+// 01_IngestiondataSales — couche RAW (« bronze »)
+// Rôle : lire les fichiers déposés par Airflow et les stocker en QVD, FIDÈLES à la source.
+// Aucune règle métier ici : on ne corrige pas, on ne dédoublonne pas. Une couche brute qui
+// « arrange » les données cache les incidents au lieu de les signaler.
+// Orchestration : Airflow (DAG qlik_sales_pipeline). Ne pas planifier ce reload dans Qlik.
+// =============================================================================
+
+// Format TECHNIQUE de la source (CSV ERP : point décimal, dates ISO). L'affichage en
+// français est fait dans l'app 03, pas ici : on lit la source dans SON format.
+SET ThousandSep=',';
+SET DecimalSep='.';
+SET MoneyThousandSep=',';
+SET MoneyDecimalSep='.';
+SET DateFormat='YYYY-MM-DD';
+SET TimestampFormat='YYYY-MM-DD hh:mm:ss';
+SET ErrorMode=1;   // toute erreur arrête le reload -> statut FAILED vu par Airflow
+
+// Un seul endroit pour les chemins : DataFiles de l'espace personnel.
+// Pour un espace partagé : 'lib://<NomEspace>:DataFiles/'.
+SET vLib = 'lib://DataFiles/';
+SET vSrcPrefix = 'qal_';
+SET vQvdRaw = 'qal_raw_';
+
+// Identifiant d'exécution transmis par Airflow (variables du POST /api/v1/reloads).
+// Valeur par défaut pour un reload manuel depuis le hub.
+LET vRunId = If(Len('$(vRunId)') > 0, '$(vRunId)', 'manuel-' & Timestamp(Now(1), 'YYYYMMDDhhmmss'));
+LET vLoadTs = Timestamp(Now(1));
+TRACE Run $(vRunId) — script $(vScriptVersion);
+
+///$tab Extract
+// Sous-routine : charge un fichier, ajoute les colonnes techniques, stocke le QVD, libère la mémoire.
+SUB IngestCsv(vTable, vFile)
+    [$(vTable)]:
+    LOAD
+        *,
+        '$(vRunId)'   AS _RunId,
+        '$(vLoadTs)'  AS _LoadTs,
+        '$(vFile)'    AS _SourceFile
+    FROM [$(vLib)$(vFile)]
+    (txt, utf8, embedded labels, delimiter is ',', msq);
+
+    LET vRows = NoOfRows('$(vTable)');
+    IF $(vRows) = 0 THEN
+        // Fichier vide = incident de source. On fait échouer le reload volontairement
+        // (lecture d'un QVD inexistant) pour que l'ordonnanceur le voie.
+        TRACE DQ_FATAL|table=$(vTable)|raison=fichier vide;
+        [ERREUR_FICHIER_VIDE]: LOAD * FROM [$(vLib)__fichier_vide_$(vTable)__.qvd] (qvd);
+    END IF
+
+    STORE [$(vTable)] INTO [$(vLib)$(vQvdRaw)$(vTable).qvd] (qvd);
+    LET vRows_$(vTable) = $(vRows);
+    DROP TABLE [$(vTable)];
+END SUB
+
+CALL IngestCsv('sales_orders', '$(vSrcPrefix)sales_orders.csv');
+CALL IngestCsv('customers',    '$(vSrcPrefix)customers.csv');
+CALL IngestCsv('products',     '$(vSrcPrefix)products.csv');
+
+///$tab DQ
+// Marqueur lu par Airflow dans le log du reload (une ligne, clé=valeur, séparateur |).
+TRACE DQ|app=01_IngestiondataSales|run_id=$(vRunId)|rows=$(vRows_sales_orders)|customers=$(vRows_customers)|products=$(vRows_products);

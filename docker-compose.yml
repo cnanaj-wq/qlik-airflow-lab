@@ -1,0 +1,116 @@
+# Airflow 3 AUTONOME pour qui n'a pas déjà un Airflow local (clone du dépôt sur un autre poste).
+# Sur le poste de l'auteur, on utilise plutôt la greffe docker/compose.qlik.yaml (scripts/lab-up.ps1),
+# qui réutilise l'Airflow existant, Mailpit et Pipeline Lens.
+#
+#   cp .env.example .env   # puis remplir QLIK_TENANT_URL et QLIK_API_KEY
+#   docker compose up -d
+#   Airflow : http://localhost:8090 (admin / mot de passe affiché par : docker compose logs airflow-apiserver)
+#   Mailpit : http://localhost:8026
+# Ports décalés (8090, 8026, 1026, 5434) pour ne pas entrer en conflit avec un autre lab.
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:${AIRFLOW_VERSION:-3.4.0}
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Paris
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    PYTHONPATH: /opt/airflow/qlik_lab_src
+    QLIK_LAB_DATA: /opt/airflow/data/qlik_lab
+    QLIK_SPACE_ID: ${QLIK_SPACE_ID:-}
+    QLIK_APP_PREFIX: ${QLIK_APP_PREFIX:-}
+    AIRFLOW_CONN_QLIK_CLOUD: '{"conn_type": "http", "host": "${QLIK_TENANT_URL:-}", "password": "${QLIK_API_KEY:-}"}'
+    AIRFLOW_CONN_QLIK_SUPERVISION: postgresql://qlik:${QLIK_SUPERVISION_PASSWORD:-change-me}@qlik-supervision-db:5432/qlik_supervision
+    AIRFLOW_CONN_SMTP_DEFAULT: '{"conn_type": "smtp", "host": "mailpit", "port": 1025, "extra": {"from_email": "airflow@lab.local", "disable_ssl": true, "disable_tls": true}}'
+    ALERTE_EMAIL_A: ${ALERTE_EMAIL_A:-equipe-data@lab.local}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/qlik_lab_src:ro
+    - airflow-logs:/opt/airflow/logs
+    - airflow-data:/opt/airflow/data
+  depends_on: &airflow-depends
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command: -c "airflow db migrate"
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "127.0.0.1:${AIRFLOW_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      interval: 30s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8026}:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1026}:1025"
+    restart: unless-stopped
+
+  qlik-supervision-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: qlik
+      POSTGRES_PASSWORD: ${QLIK_SUPERVISION_PASSWORD:-change-me}
+      POSTGRES_DB: qlik_supervision
+    ports:
+      - "127.0.0.1:${QLIK_SUPERVISION_PORT:-5434}:5432"
+    volumes:
+      - qlik-supervision-pg:/var/lib/postgresql/data
+      - ./docker/supervision/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    restart: unless-stopped
+
+volumes:
+  airflow-pg:
+  airflow-logs:
+  airflow-data:
+  qlik-supervision-pg:
