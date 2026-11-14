@@ -15,7 +15,7 @@
           "deploy",
           "r01"
         ],
-        "note": "La CI teste chaque push sur main. Les scripts sont poussés dans Qlik par la commande deploy, depuis le poste."
+        "note": "Chaque PR vers main passe la CI. Après fusion, le job deploy de GitHub Actions pousse les scripts dans Qlik."
       },
       {
         "id": "nominal",
@@ -109,8 +109,8 @@
       "lane": "git",
       "col": 0,
       "type": "frontend",
-      "label": "Push main",
-      "sublabel": "scripts .qvs + DAG"
+      "label": "PR main",
+      "sublabel": "squash and merge"
     },
     {
       "id": "ci",
@@ -127,7 +127,7 @@
       "col": 3,
       "type": "cloud",
       "label": "Deploy",
-      "sublabel": "depuis le poste",
+      "sublabel": "GitHub Actions",
       "tag": "CD"
     },
     {
@@ -211,6 +211,12 @@
       "to": "ci"
     },
     {
+      "from": "ci",
+      "to": "deploy",
+      "label": "vert",
+      "variant": "emphasis"
+    },
+    {
       "from": "deploy",
       "to": "r01",
       "label": "scripts",
@@ -287,7 +293,7 @@
       "items": [
         "CI : lint, typage, règles des scripts Qlik",
         "DAG chargés dans l'image Airflow 3.4",
-        "Scripts poussés par deploy, depuis le poste"
+        "Scripts poussés par le job deploy (GitHub Actions)"
       ]
     },
     {

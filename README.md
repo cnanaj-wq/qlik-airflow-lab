@@ -12,7 +12,7 @@ publier des chiffres faux, même quand tout est vert.**
 > **Réel / simulé**
 > - **Réel** : tenant Qlik Cloud, API REST (reloads, data files, scripts), Airflow 3.4,
 >   Postgres, mails d'alerte (boîte de test Mailpit), CI GitHub Actions, déploiement des scripts
->   par l'API Qlik (lancé depuis le poste).
+>   par l'API Qlik depuis GitHub Actions (job `deploy`).
 > - **Simulé** : l'ERP source (générateur déterministe), l'incident de doublons, la panne
 >   passagère et le renommage de fichier. Ces incidents sont simulés, mais leurs effets dans
 >   Qlik sont réels (reload FAILED, CA gonflé).
@@ -143,26 +143,39 @@ Détail, rôles et fiches réflexes : [docs/PLAN-REPRISE.md](docs/PLAN-REPRISE.m
 ```mermaid
 %%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}} }%%
 flowchart LR
-    A[Push sur main] --> B{CI GitHub Actions<br/>tests · dags · compose}
-    B -- rouge --> X[Rien n'est publié]
+    R[PR vers main] --> C{CI sur la PR<br/>tests · dags · compose}
+    C -- rouge --> X[On corrige<br/>avant de fusionner]
+    C -- vert --> M[Squash and merge<br/>dans main]
+    M --> B{CI sur main}
     B -- vert --> P[Schémas sur<br/>GitHub Pages]
-    L[Poste du lab<br/>python -m qlik_lab deploy] --> D[Scripts poussés<br/>par l'API Qlik]
+    B -- vert --> D[Job deploy<br/>scripts poussés par l'API Qlik]
     D --> E[3 apps à jour<br/>vScriptVersion = commit]
+    E --> F[DAG Airflow<br/>porte qualité, puis 03]
 
     classDef ci fill:#eef2f6,stroke:#5b6b7f,color:#1f2a37
     classDef cd fill:#e3f5f1,stroke:#0f8a75,color:#073b33
     classDef stop fill:#fde7ea,stroke:#b00020,color:#5c0010
-    class A,B,L ci
-    class D,E,P cd
+    class R,C,M,B ci
+    class D,E,F,P cd
     class X stop
 ```
 
 Détail : [docs/CICD.md](docs/CICD.md).
 
-**État réel.** La CI tourne à chaque push sur `main` et publie les schémas sur GitHub Pages. Le
-déploiement des scripts vers Qlik Cloud a été exécuté depuis le poste du lab. Le job `deploy` du
-workflow existe, mais il n'a encore jamais poussé de script depuis GitHub : l'environnement
-`qlik-cloud` n'a pas de secrets.
+**Parcours exécuté le 14/11/2026.**
+
+| Étape | Résultat |
+|---|---|
+| PR vers `main` | CI verte : `tests`, `dags`, `compose` ; `deploy` et `pages` ne tournent pas sur une PR |
+| *Squash and merge* | CI verte sur `main`, schémas publiés |
+| Job `deploy` (lancé par *Run workflow*) | 10 s ; les 3 apps existantes reçoivent le script `782b273` |
+| DAG `qlik_sales_pipeline` | Reloads 01 et 02 réussis, porte qualité verte (écart de CA 0 %), puis 03 rechargée |
+| Log du reload 03 | `SET vScriptVersion = '782b273'` |
+
+Les secrets `QLIK_TENANT_URL` et `QLIK_API_KEY` sont dans l'environnement GitHub `qlik-cloud`, lus
+par le seul job `deploy`. La règle de `main` et `features` interdit le push forcé et la
+suppression, et impose un historique linéaire ; elle n'exige ni approbation ni CI verte pour
+fusionner.
 
 Chaque script déployé porte en tête le commit dont il vient, injecté par
 [`deploy.py`](src/qlik_lab/deploy.py) : `SET vScriptVersion = '<commit>';`. Ce numéro se retrouve
@@ -170,7 +183,7 @@ dans l'éditeur de script, dans le log de chaque reload et dans l'app 03.
 
 ![La chaîne vScriptVersion, du commit à l'app](docs/img/chaine-vscriptversion.png)
 
-![Un run GitHub Actions : tests, dags et compose verts, pages publié, deploy sans action](docs/img/cicd-run-github-actions.png)
+![Run GitHub Actions du 14/11/2026 : tests, dags et compose verts, pages publié, deploy 10 s vers Qlik Cloud](docs/img/cicd-run-github-actions.png)
 
 ## Exploitation : DataOps, observabilité, FinOps
 
@@ -252,7 +265,7 @@ Le lab ne mesure pas de coût en euros. Ce qui est en place :
 | DAG Airflow | Déclencher → capteur reschedule → porte qualité → publication ; retries ; alertes mail | ✅ testé sur le tenant |
 | Supervision | Tables `reload_runs`, `dq_results`, vue des échecs, panneau Incidents (Pipeline Lens), Grafana | ✅ |
 | CI | Lint et tests, règles des scripts Qlik, DAG dans l'image Airflow 3.4, compose, schémas sur GitHub Pages | ✅ à chaque push sur `main` |
-| Déploiement des scripts | `python -m qlik_lab deploy` : apps retrouvées par nom, script poussé avec `vScriptVersion` | ✅ lancé depuis le poste ; jamais depuis GitHub (pas de secrets) |
+| Déploiement des scripts | `python -m qlik_lab deploy` : apps retrouvées par nom, script poussé avec `vScriptVersion` | ✅ depuis GitHub Actions (job `deploy`) et depuis le poste |
 
 ## Démarrer
 
