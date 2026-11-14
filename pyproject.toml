@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qlik-airflow-lab"
+version = "0.1.0"
+description = "Orchestrer et superviser les reloads Qlik Cloud avec Apache Airflow 3"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Cedric NANA" }]
+# Une seule dépendance d'exécution, déjà présente dans l'image apache/airflow :
+# aucune image Docker personnalisée n'est nécessaire.
+dependencies = ["requests>=2.31"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "responses>=0.25",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-requests",
+]
+
+[project.scripts]
+qlik-lab = "qlik_lab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+# Les tests des DAG ont besoin d'Airflow : ils tournent dans l'image officielle (job CI dédié).
+norecursedirs = ["tests/dags"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "dags", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = [
+  "E501",   # longueur de ligne gérée par « ruff format »
+  "S101",   # assert : normal dans les tests
+  "RUF001", # apostrophes typographiques françaises dans les textes
+  "RUF002",
+  "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true

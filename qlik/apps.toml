@@ -1,0 +1,20 @@
+# Manifeste des apps Qlik Cloud : l'ORDRE compte (chaque couche lit la précédente).
+# Le nom final est préfixé par QLIK_APP_PREFIX (ex. DEV_) si défini.
+
+[[apps]]
+key = "ingestion"
+name = "01_IngestiondataSales"
+description = "Couche brute : fichiers source -> QVD RAW, fidèles à la source. Orchestrée par Airflow."
+script = "apps/01_IngestiondataSales/script.qvs"
+
+[[apps]]
+key = "transform"
+name = "02_TransformDataSales"
+description = "Couche transformée : modèle en étoile, règles de calcul du CA, indicateurs DQ."
+script = "apps/02_TransformDataSales/script.qvs"
+
+[[apps]]
+key = "operations"
+name = "03_Sales_Operations"
+description = "App de pilotage des ventes, publiée seulement si la porte qualité est verte."
+script = "apps/03_Sales_Operations/script.qvs"

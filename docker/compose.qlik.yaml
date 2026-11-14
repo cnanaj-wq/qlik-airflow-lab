@@ -1,0 +1,52 @@
+# Greffe du lab Qlik sur l'Airflow 3 existant (C:\airflow), SANS modifier ses fichiers.
+# Docker Compose fusionne ce fichier avec C:\airflow\docker-compose.yaml :
+#   - les DAG du lab apparaissent dans /opt/airflow/dags/qlik_lab (lecture seule) ;
+#   - le paquet Python qlik_lab est monté et ajouté au PYTHONPATH (pas d'image personnalisée) ;
+#   - la clé Qlik devient une CONNEXION Airflow « qlik_cloud » par variable d'environnement
+#     (AIRFLOW_CONN_*) : elle n'est stockée ni dans la base Airflow ni dans le code ;
+#   - une base Postgres de supervision est ajoutée sur 127.0.0.1:5434.
+# Lancement : scripts/lab-up.ps1 (qui passe les deux fichiers .env).
+# Chemins ABSOLUS obligatoires : avec plusieurs -f, les chemins relatifs partent de C:\airflow.
+
+x-qlik-env: &qlik-env
+  PYTHONPATH: /opt/airflow/qlik_lab_src
+  QLIK_LAB_DATA: /opt/airflow/data/qlik_lab
+  QLIK_SPACE_ID: ${QLIK_SPACE_ID:-}
+  QLIK_APP_PREFIX: ${QLIK_APP_PREFIX:-}
+  AIRFLOW_CONN_QLIK_CLOUD: '{"conn_type": "http", "host": "${QLIK_TENANT_URL:?QLIK_TENANT_URL absente du .env du lab}", "password": "${QLIK_API_KEY:?QLIK_API_KEY absente du .env du lab}"}'
+  AIRFLOW_CONN_QLIK_SUPERVISION: postgresql://qlik:${QLIK_SUPERVISION_PASSWORD:?QLIK_SUPERVISION_PASSWORD absent du .env du lab}@qlik-supervision-db:5432/qlik_supervision
+
+x-qlik-volumes: &qlik-volumes
+  - ${QLIK_LAB_DIR:-C:/qlik-airflow-lab}/dags:/opt/airflow/dags/qlik_lab:ro
+  - ${QLIK_LAB_DIR:-C:/qlik-airflow-lab}/src:/opt/airflow/qlik_lab_src:ro
+
+services:
+  airflow-apiserver:
+    environment: *qlik-env
+    volumes: *qlik-volumes
+  airflow-scheduler:
+    environment: *qlik-env
+    volumes: *qlik-volumes
+  airflow-dag-processor:
+    environment: *qlik-env
+    volumes: *qlik-volumes
+
+  qlik-supervision-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: qlik
+      POSTGRES_PASSWORD: ${QLIK_SUPERVISION_PASSWORD:?QLIK_SUPERVISION_PASSWORD absent du .env du lab}
+      POSTGRES_DB: qlik_supervision
+    ports:
+      - "127.0.0.1:${QLIK_SUPERVISION_PORT:-5434}:5432"
+    volumes:
+      - qlik-supervision-pg:/var/lib/postgresql/data
+      - ${QLIK_LAB_DIR:-C:/qlik-airflow-lab}/docker/supervision/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "qlik", "-d", "qlik_supervision"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  qlik-supervision-pg:

@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CI/CD des scripts Qlik : ce qui tourne réellement",
+    "output": "docs/cicd.html",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "views": [
+      {
+        "id": "ci",
+        "label": "01 / CI",
+        "focus": [
+          "push",
+          "tests",
+          "pages",
+          "cifail"
+        ],
+        "note": "Chaque push sur main passe les 3 contrôles. Vert : les schémas partent sur GitHub Pages. Rouge : rien n'est publié."
+      },
+      {
+        "id": "deploy",
+        "label": "02 / Déploiement",
+        "focus": [
+          "push",
+          "deploy",
+          "apps"
+        ],
+        "note": "Scripts poussés dans Qlik Cloud par la commande deploy, lancée du poste. Le job deploy de GitHub n'a pas de secrets."
+      }
+    ],
+    "animation": "trace"
+  },
+  "lanes": [
+    {
+      "id": "ci",
+      "label": "GitHub Actions — CI"
+    },
+    {
+      "id": "cd",
+      "label": "Poste du lab — déploiement"
+    },
+    {
+      "id": "target",
+      "label": "Cible — Qlik Cloud (réel)"
+    }
+  ],
+  "mainPath": [
+    "push",
+    "tests",
+    "pages"
+  ],
+  "nodes": [
+    {
+      "id": "push",
+      "lane": "ci",
+      "col": 0,
+      "type": "frontend",
+      "label": "Push sur main",
+      "sublabel": "commit"
+    },
+    {
+      "id": "tests",
+      "lane": "ci",
+      "col": 2,
+      "type": "backend",
+      "label": "CI : 3 jobs",
+      "sublabel": "tests · dags · compose"
+    },
+    {
+      "id": "pages",
+      "lane": "ci",
+      "col": 4,
+      "type": "cloud",
+      "label": "GitHub Pages",
+      "sublabel": "schémas publiés"
+    },
+    {
+      "id": "cifail",
+      "lane": "cd",
+      "col": 2,
+      "type": "security",
+      "label": "Contrôle rouge",
+      "sublabel": "rien n'est publié"
+    },
+    {
+      "id": "deploy",
+      "lane": "cd",
+      "col": 0,
+      "type": "backend",
+      "label": "deploy",
+      "sublabel": "depuis le poste"
+    },
+    {
+      "id": "apps",
+      "lane": "target",
+      "col": 0,
+      "type": "database",
+      "label": "3 apps Qlik",
+      "sublabel": "script versionné",
+      "tag": "réel"
+    }
+  ],
+  "edges": [
+    {
+      "from": "push",
+      "to": "tests"
+    },
+    {
+      "from": "tests",
+      "to": "pages",
+      "label": "vert",
+      "variant": "emphasis"
+    },
+    {
+      "from": "tests",
+      "to": "cifail",
+      "label": "rouge",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "from": "push",
+      "to": "deploy",
+      "label": "même commit"
+    },
+    {
+      "from": "deploy",
+      "to": "apps",
+      "label": "vScriptVersion",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "CI · Vérifier",
+      "items": [
+        "Lint, typage, 55 tests, règles maison des scripts Qlik",
+        "DAG chargés dans l'image officielle Airflow 3.4",
+        "Contrôle rouge : rien n'est publié"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Déploiement · Publier",
+      "items": [
+        "Apps retrouvées par nom, créées si absentes",
+        "Chaque script porte son commit (vScriptVersion)",
+        "Lancé depuis le poste ; job deploy sans secrets"
+      ]
+    }
+  ]
+}

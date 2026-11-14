@@ -1,0 +1,120 @@
+///$tab Main
+// =============================================================================
+// 02_TransformDataSales — couche TRANSFORMÉE (« silver / gold »)
+// Rôle : modèle en étoile + règle de calcul du CA, stockés en QVD pour l'app de pilotage.
+// Publie dans son log les indicateurs de qualité (TRACE DQ|...) lus par la porte qualité d'Airflow.
+//
+// Choix pédagogique assumé : pas de dédoublonnage ici. Si la source livre deux fois le même lot,
+// le reload réussit et le CA grossit. C'est le cas que la porte qualité doit attraper.
+// =============================================================================
+SET ThousandSep=',';
+SET DecimalSep='.';
+SET DateFormat='YYYY-MM-DD';
+SET TimestampFormat='YYYY-MM-DD hh:mm:ss';
+SET ErrorMode=1;
+
+SET vLib = 'lib://DataFiles/';
+SET vQvdRaw = 'qal_raw_';
+SET vQvdTrf = 'qal_trf_';
+
+LET vRunId = If(Len('$(vRunId)') > 0, '$(vRunId)', 'manuel-' & Timestamp(Now(1), 'YYYYMMDDhhmmss'));
+TRACE Run $(vRunId) — script $(vScriptVersion);
+
+///$tab Dimensions
+DIM_Product:
+LOAD
+    ProductID,
+    ProductName,
+    Category,
+    Num(ListPrice) AS ListPrice,
+    Num(UnitCost)  AS UnitCost
+FROM [$(vLib)$(vQvdRaw)products.qvd] (qvd);
+
+DIM_Customer:
+LOAD
+    CustomerID,
+    CustomerName,
+    Region,
+    Segment
+FROM [$(vLib)$(vQvdRaw)customers.qvd] (qvd);
+
+// Coût unitaire en mapping : évite une jointure qui pourrait dupliquer des lignes.
+MAP_UnitCost:
+MAPPING LOAD ProductID, UnitCost RESIDENT DIM_Product;
+
+///$tab Fact
+FACT_Sales:
+LOAD
+    OrderLineID,
+    OrderID,
+    Date(Floor(Date#(OrderDate, 'YYYY-MM-DD'))) AS OrderDate,
+    CustomerID,
+    ProductID,
+    Channel,
+    Quantity,
+    UnitPrice,
+    Discount,
+    // Règle de gestion du CA, la même que celle de la source (contrat partagé avec Airflow).
+    Round(Quantity * UnitPrice * (1 - Discount), 0.01)                                     AS Revenue,
+    Round(Quantity * UnitPrice * (1 - Discount)
+          - Quantity * ApplyMap('MAP_UnitCost', ProductID, 0), 0.01)                        AS Margin,
+    _RunId AS _IngestRunId
+FROM [$(vLib)$(vQvdRaw)sales_orders.qvd] (qvd);
+
+///$tab Calendar
+// Calendrier maître généré entre la première et la dernière date de vente.
+TMP_Range:
+LOAD Min(OrderDate) AS MinD, Max(OrderDate) AS MaxD RESIDENT FACT_Sales;
+LET vMinD = Num(Peek('MinD', 0, 'TMP_Range'));
+LET vMaxD = Num(Peek('MaxD', 0, 'TMP_Range'));
+DROP TABLE TMP_Range;
+
+DIM_Calendar:
+LOAD
+    Date(d)                          AS OrderDate,
+    Year(d)                          AS Year,
+    'T' & Ceil(Month(d) / 3)         AS Quarter,
+    Num(Month(d))                    AS MonthNum,
+    Date(MonthStart(d), 'YYYY-MM')   AS YearMonth,
+    Week(d)                          AS Week,
+    WeekDay(d)                       AS WeekDayNum,
+    If(WeekDay(d) >= 5, 1, 0)        AS IsWeekend,
+    If(d = $(vMaxD), 1, 0)           AS IsLastDay;
+LOAD $(vMinD) + IterNo() - 1 AS d
+AUTOGENERATE 1 WHILE $(vMinD) + IterNo() - 1 <= $(vMaxD);
+
+///$tab DQ
+// Indicateurs calculés sur la table de faits FINALE (ce que verront les utilisateurs).
+DQ_All:
+LOAD
+    Count(OrderLineID)            AS Rows,
+    Count(DISTINCT OrderLineID)   AS DistinctKeys,
+    Count(DISTINCT OrderID)       AS Orders,
+    Sum(Revenue)                  AS Revenue
+RESIDENT FACT_Sales;
+
+DQ_Day:
+LOAD
+    Count(OrderLineID) AS RowsDay,
+    Sum(Revenue)       AS RevenueDay
+RESIDENT FACT_Sales
+WHERE Num(OrderDate) = $(vMaxD);
+
+// Format technique imposé (point décimal, pas de séparateur de milliers) : Airflow relit ces
+// nombres. Ne jamais dépendre des paramètres régionaux pour un échange machine à machine.
+LET vDQ_Rows     = Peek('Rows', 0, 'DQ_All');
+LET vDQ_Distinct = Peek('DistinctKeys', 0, 'DQ_All');
+LET vDQ_Orders   = Peek('Orders', 0, 'DQ_All');
+LET vDQ_Revenue  = Num(Peek('Revenue', 0, 'DQ_All'), '0.00', '.', '');
+LET vDQ_RowsDay  = Peek('RowsDay', 0, 'DQ_Day');
+LET vDQ_RevDay   = Num(Peek('RevenueDay', 0, 'DQ_Day'), '0.00', '.', '');
+LET vDQ_LastDay  = Date($(vMaxD), 'YYYY-MM-DD');
+DROP TABLES DQ_All, DQ_Day;
+
+TRACE DQ|app=02_TransformDataSales|run_id=$(vRunId)|rows=$(vDQ_Rows)|distinct_keys=$(vDQ_Distinct)|orders=$(vDQ_Orders)|revenue=$(vDQ_Revenue)|rows_last_day=$(vDQ_RowsDay)|revenue_last_day=$(vDQ_RevDay)|last_day=$(vDQ_LastDay);
+
+///$tab Store
+STORE FACT_Sales   INTO [$(vLib)$(vQvdTrf)fact_sales.qvd] (qvd);
+STORE DIM_Customer INTO [$(vLib)$(vQvdTrf)dim_customer.qvd] (qvd);
+STORE DIM_Product  INTO [$(vLib)$(vQvdTrf)dim_product.qvd] (qvd);
+STORE DIM_Calendar INTO [$(vLib)$(vQvdTrf)dim_calendar.qvd] (qvd);
