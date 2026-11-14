@@ -79,8 +79,8 @@ La commande `python -m qlik_lab deploy` ([`deploy.py`](../src/qlik_lab/deploy.py
 
 Le job `deploy` du workflow appelle la même commande, après `tests`, `dags` et `compose`, un
 déploiement à la fois (`concurrency`), avec les secrets de l'environnement `qlik-cloud`. Il tourne
-sur un lancement *Run workflow* (c'est ainsi qu'il a été exécuté) ou sur un push dans `main` qui
-modifie `qlik/`. La même commande se lance aussi depuis le poste.
+sur un lancement *Run workflow* ou sur un push dans `main` qui modifie `qlik/`. Seul le lancement
+*Run workflow* a été exécuté à ce jour. La même commande se lance aussi depuis le poste.
 
 **Job `pages`** : après `tests`, publie les schémas interactifs (`docs/*.html`) sur GitHub Pages.
 Seuls les fichiers HTML partent.
