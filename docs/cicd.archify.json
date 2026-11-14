@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "workflow",
   "meta": {
-    "title": "CI/CD des scripts Qlik : ce qui tourne réellement",
+    "title": "CI/CD des scripts Qlik : de la PR à la porte qualité",
     "output": "docs/cicd.html",
     "quality_profile": "showcase",
     "visual_preset": "signal-flow",
@@ -13,20 +13,20 @@
         "focus": [
           "push",
           "tests",
-          "pages",
-          "cifail"
+          "pages"
         ],
-        "note": "Chaque push sur main passe les 3 contrôles. Vert : les schémas partent sur GitHub Pages. Rouge : rien n'est publié."
+        "note": "Chaque PR vers main passe les 3 contrôles. Vert : fusion, puis schémas sur GitHub Pages. Rouge : on corrige avant de fusionner."
       },
       {
         "id": "deploy",
         "label": "02 / Déploiement",
         "focus": [
-          "push",
+          "tests",
           "deploy",
-          "apps"
+          "apps",
+          "dag"
         ],
-        "note": "Scripts poussés dans Qlik Cloud par la commande deploy, lancée du poste. Le job deploy de GitHub n'a pas de secrets."
+        "note": "Le job deploy pousse les scripts par l'API Qlik. Le DAG recharge ensuite : 03 seulement si la porte qualité est verte."
       }
     ],
     "animation": "trace"
@@ -38,17 +38,19 @@
     },
     {
       "id": "cd",
-      "label": "Poste du lab — déploiement"
+      "label": "GitHub Actions — déploiement"
     },
     {
       "id": "target",
-      "label": "Cible — Qlik Cloud (réel)"
+      "label": "Cible — Qlik Cloud et Airflow (réel)"
     }
   ],
   "mainPath": [
     "push",
     "tests",
-    "pages"
+    "deploy",
+    "apps",
+    "dag"
   ],
   "nodes": [
     {
@@ -56,8 +58,8 @@
       "lane": "ci",
       "col": 0,
       "type": "frontend",
-      "label": "Push sur main",
-      "sublabel": "commit"
+      "label": "PR vers main",
+      "sublabel": "puis squash and merge"
     },
     {
       "id": "tests",
@@ -76,28 +78,29 @@
       "sublabel": "schémas publiés"
     },
     {
-      "id": "cifail",
-      "lane": "cd",
-      "col": 2,
-      "type": "security",
-      "label": "Contrôle rouge",
-      "sublabel": "rien n'est publié"
-    },
-    {
       "id": "deploy",
       "lane": "cd",
-      "col": 0,
+      "col": 2,
       "type": "backend",
       "label": "deploy",
-      "sublabel": "depuis le poste"
+      "sublabel": "secrets qlik-cloud"
     },
     {
       "id": "apps",
       "lane": "target",
-      "col": 0,
+      "col": 2,
       "type": "database",
       "label": "3 apps Qlik",
       "sublabel": "script versionné",
+      "tag": "réel"
+    },
+    {
+      "id": "dag",
+      "lane": "target",
+      "col": 4,
+      "type": "backend",
+      "label": "DAG Airflow",
+      "sublabel": "porte qualité, puis 03",
       "tag": "réel"
     }
   ],
@@ -114,21 +117,20 @@
     },
     {
       "from": "tests",
-      "to": "cifail",
-      "label": "rouge",
-      "variant": "security",
-      "role": "error"
-    },
-    {
-      "from": "push",
       "to": "deploy",
-      "label": "même commit"
+      "label": "vert",
+      "variant": "emphasis"
     },
     {
       "from": "deploy",
       "to": "apps",
       "label": "vScriptVersion",
       "variant": "emphasis"
+    },
+    {
+      "from": "apps",
+      "to": "dag",
+      "label": "reloads"
     }
   ],
   "cards": [
@@ -138,16 +140,16 @@
       "items": [
         "Lint, typage, 55 tests, règles maison des scripts Qlik",
         "DAG chargés dans l'image officielle Airflow 3.4",
-        "Contrôle rouge : rien n'est publié"
+        "Contrôle rouge : deploy et pages ne partent pas"
       ]
     },
     {
       "dot": "emerald",
       "title": "Déploiement · Publier",
       "items": [
-        "Apps retrouvées par nom, créées si absentes",
+        "Job deploy : secrets de l'environnement qlik-cloud",
         "Chaque script porte son commit (vScriptVersion)",
-        "Lancé depuis le poste ; job deploy sans secrets"
+        "Le DAG recharge ; 03 seulement si la porte est verte"
       ]
     }
   ]

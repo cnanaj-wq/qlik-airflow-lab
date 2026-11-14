@@ -5,8 +5,7 @@
 #              compose: les fichiers Docker Compose sont valides
 #   02 / CD    deploy : pousse les scripts Qlik vers Qlik Cloud (apps créées si absentes)
 #              -> seulement sur main, seulement si qlik/ a changé (ou lancement manuel),
-#              -> exige les secrets QLIK_TENANT_URL / QLIK_API_KEY de l'environnement « qlik-cloud »
-#                 (non renseignés à ce jour : le déploiement est lancé depuis le poste du lab).
+#              -> exige les secrets QLIK_TENANT_URL / QLIK_API_KEY de l'environnement « qlik-cloud ».
 #              pages  : publie les schémas interactifs (docs/*.html) sur GitHub Pages
 #   Une PR ne déploie jamais : elle n'a pas accès aux secrets.
 
