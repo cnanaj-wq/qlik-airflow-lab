@@ -1,5 +1,18 @@
 # Qlik × Airflow Lab
 
+[![CI/CD](https://github.com/cnanaj-wq/qlik-airflow-lab/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/cnanaj-wq/qlik-airflow-lab/actions/workflows/ci-cd.yml)
+![Qlik Cloud](https://img.shields.io/badge/Qlik_Cloud-API_REST-009848?logo=qlik&logoColor=white)
+![Apache Airflow](https://img.shields.io/badge/Apache_Airflow-3.4-017CEE?logo=apacheairflow&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI%2FCD-2088FF?logo=githubactions&logoColor=white)
+![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)
+![mypy](https://img.shields.io/badge/mypy-strict-2A6DB2)
+![pytest](https://img.shields.io/badge/pytest-9.2-0A9EDC?logo=pytest&logoColor=white)
+![Grafana](https://img.shields.io/badge/Grafana-12.1-F46800?logo=grafana&logoColor=white)
+![Mailpit](https://img.shields.io/badge/Mailpit-1.32-0F766E)
+
 **Orchestrer les reloads Qlik Cloud comme le ferait un ordonnanceur d'entreprise, et refuser de
 publier des chiffres faux, même quand tout est vert.**
 
